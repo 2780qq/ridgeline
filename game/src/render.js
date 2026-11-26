@@ -17,7 +17,9 @@ function text(g, str, x, y, size = 14, color = C.paper, align = 'left', weight =
 
 /** One frame of the whole flight. */
 export function draw(g, f) {
-  const cam = { x: f.x, z: f.z, alt: f.alt, yaw: f.yaw, pitch: f.pitch, roll: f.roll };
+  // the chase camera sits above and behind the aircraft and is angled a little further down than
+  // the aircraft itself, which is what brings the near ground into the lower half of the frame
+  const cam = { x: f.x, z: f.z, alt: f.alt, yaw: f.yaw, pitch: f.pitch - 0.10, roll: f.roll };
   drawSky(g);
   drawSun(g, cam);
   const mesh = buildTerrainMesh(cam, FOV, W, H, 12000, 80, 56);
@@ -145,29 +147,70 @@ function drawRings(g, cam, f) {
 
 /** The runway: a strip with its centreline and threshold bars, drawn only when it is ahead. */
 function drawRunway(g, cam) {
-  const dz = RUNWAY.z - cam.z;
-  if (dz < 80 || dz > 6000) return;
+  // The strip is drawn in segments, because the near end of a long runway sits behind the camera's
+  // near plane and would otherwise drop the whole strip.
   const halfW = RUNWAY.width / 2;
-  const near = project(-halfW - cam.x, -cam.alt, dz - RUNWAY.length / 2, { yaw: 0, pitch: cam.pitch, roll: cam.roll }, FOV, W, H);
-  const far = project(halfW - cam.x, -cam.alt, dz + RUNWAY.length / 2, { yaw: 0, pitch: cam.pitch, roll: cam.roll }, FOV, W, H);
-  if (!near || !far) return;
+  const segs = 14;
+  const z0 = RUNWAY.z - RUNWAY.length / 2;
+  const z1 = RUNWAY.z + RUNWAY.length / 2;
+  const pts = [];
+  for (let i = 0; i <= segs; i++) {
+    const wz = z0 + ((z1 - z0) * i) / segs;
+    const dz = wz - cam.z;
+    pts.push({
+      dz,
+      left: project(-halfW - cam.x, heightAt(0, wz) - cam.alt, dz, { yaw: 0, pitch: cam.pitch, roll: cam.roll }, FOV, W, H),
+      right: project(halfW - cam.x, heightAt(0, wz) - cam.alt, dz, { yaw: 0, pitch: cam.pitch, roll: cam.roll }, FOV, W, H),
+    });
+  }
 
-  g.strokeStyle = 'rgba(58,58,56,.85)';
-  g.lineWidth = Math.max(2, 60 * near.scale * 0.4);
-  g.beginPath(); g.moveTo(near.x, near.y); g.lineTo(far.x, far.y); g.stroke();
-
-  // threshold bars a third of the way in, which read as an airport at any distance
-  const t = 0.18;
-  const bx = near.x + (far.x - near.x) * t;
-  const by = near.y + (far.y - near.y) * t;
-  const span = Math.max(3, 22 * near.scale * 0.35);
-  g.strokeStyle = C.runwayLine;
-  g.lineWidth = Math.max(1, 2.5 * near.scale * 0.35);
-  for (let i = -2; i <= 2; i++) {
+  // the paved surface, as one quad per segment that is in front of the near plane
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (!a.left || !a.right || !b.left || !b.right) continue;
+    g.fillStyle = i % 2 === 0 ? '#4e4c46' : '#53514a';
     g.beginPath();
-    g.moveTo(bx + i * span * 0.6, by);
-    g.lineTo(bx + i * span * 0.6, by - span * 0.5);
-    g.stroke();
+    g.moveTo(a.left.x, a.left.y); g.lineTo(a.right.x, a.right.y);
+    g.lineTo(b.right.x, b.right.y); g.lineTo(b.left.x, b.left.y);
+    g.closePath(); g.fill();
+  }
+
+  // the threshold bars and the centreline, drawn only on segments that survive
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (!a.left || !a.right || !b.left || !b.right) continue;
+    const cx = (a.left.x + a.right.x) / 2;
+    const bx = (b.left.x + b.right.x) / 2;
+    // centre dashes
+    if (i % 2 === 0) {
+      g.strokeStyle = 'rgba(232,228,216,.5)';
+      g.lineWidth = Math.max(1, 2.4 * (a.left.scale || 0.2));
+      g.beginPath(); g.moveTo(cx, (a.left.y + a.right.y) / 2); g.lineTo(bx, (b.left.y + b.right.y) / 2); g.stroke();
+    }
+    // threshold bars on the first third
+    if (i < 3) {
+      const span = Math.max(2, Math.abs(a.right.x - a.left.x) * 0.28);
+      g.strokeStyle = 'rgba(240,236,224,.85)';
+      g.lineWidth = Math.max(1, 2.2 * (a.left.scale || 0.2));
+      for (let k = -2; k <= 2; k++) {
+        g.beginPath();
+        g.moveTo(cx + k * span, (a.left.y + a.right.y) / 2);
+        g.lineTo(bx + k * span, (b.left.y + b.right.y) / 2);
+        g.stroke();
+      }
+    }
+  }
+
+  // the approach light chain, which announces the runway from a distance
+  g.fillStyle = 'rgba(240,192,64,.85)';
+  for (let i = 2; i <= segs; i += 2) {
+    const a = pts[i];
+    if (!a.left || !a.right) continue;
+    const yy = (a.left.y + a.right.y) / 2;
+    const xx = (a.left.x + a.right.x) / 2;
+    if (yy < 0 || yy > H) continue;
+    const rr2 = Math.max(1.4, 3.2 * (a.left.scale || 0.2));
+    g.beginPath(); g.arc(xx, yy, rr2, 0, Math.PI * 2); g.fill();
   }
 }
 

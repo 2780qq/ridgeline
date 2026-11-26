@@ -38,8 +38,8 @@ function stageShot(kind) {
   flight = createFlight();
   if (kind === 'approach') {
     // on final: wings level, a shallow descent, the runway and the first ring ahead
-    flight.x = -180; flight.z = -1500; flight.alt = 820;
-    flight.pitch = -0.075; flight.roll = 0.05; flight.speed = 265; flight.throttle = 0.45;
+    flight.x = -40; flight.z = -2400; flight.alt = 460;
+    flight.pitch = -0.04; flight.roll = 0.03; flight.speed = 210; flight.throttle = 0.32;
     flight.ringsPassed = 2;
     flight.distance = 41000;
   } else if (kind === 'valley') {
